@@ -147,6 +147,22 @@ tamaño normal el error baja al orden de las micras.
 
 ---
 
+## Despliegue en GitHub Pages
+
+Hay un workflow en `.github/workflows/desplegar.yml` que compila y publica en
+cada push. Para que funcione, en **Settings -> Pages** el *Source* tiene que
+estar en **"GitHub Actions"**.
+
+Con la opcion *"Deploy from a branch"* la web sale en blanco: publica los
+ficheros del repositorio sin compilar, y `index.html` apunta a `src/main.js`,
+que importa `three` por su nombre de paquete. El navegador no sabe resolver eso
+sin empaquetado.
+
+El `base: './'` de `vite.config.js` esta puesto para que la app funcione servida
+desde un subdirectorio, que es como publica Pages los sitios de proyecto
+(`usuario.github.io/repositorio/`). El worker de carga y el `.wasm` de LAZ se
+referencian con URL relativas por el mismo motivo.
+
 ## Desarrollo
 
 ```bash
