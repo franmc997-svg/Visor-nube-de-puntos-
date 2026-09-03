@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b0f14" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Nube" />
+  <meta name="description" content="Visor de nubes de puntos con color, pensado para iPhone." />
+  <link rel="icon" href="./icon-192.png" />
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="./icon-180.png" />
+  <title>Visor de nube de puntos</title>
+</head>
+<body>
+  <canvas id="lienzo"></canvas>
+
+  <!-- Pantalla inicial / zona de carga -->
+  <div id="inicio" class="pantalla">
+    <div class="inicio-caja">
+      <h1>Visor de nube de puntos</h1>
+      <p class="sub">LAS · LAZ · PLY · PCD · XYZ / TXT / CSV / PTS</p>
+      <button id="btn-abrir" class="primario grande">Abrir fichero</button>
+      <button id="btn-url" class="secundario">Abrir desde una URL</button>
+      <p class="nota" id="nota-presupuesto"></p>
+    </div>
+  </div>
+
+  <!-- Progreso de carga -->
+  <div id="cargando" class="pantalla oculto">
+    <div class="inicio-caja">
+      <div class="barra"><div class="barra-relleno" id="barra-relleno"></div></div>
+      <p class="etiqueta-carga" id="etiqueta-carga">Leyendo…</p>
+      <p class="nota" id="nota-carga"></p>
+    </div>
+  </div>
+
+  <!-- HUD superior -->
+  <div id="hud" class="oculto">
+    <div class="hud-izq">
+      <span id="hud-nombre"></span>
+      <span id="hud-stats" class="tenue"></span>
+    </div>
+    <button id="btn-encuadrar" class="icono" title="Encuadrar todo" aria-label="Encuadrar todo">⤢</button>
+  </div>
+
+  <!-- Control rapido de tamaño de punto, siempre visible -->
+  <div id="barra-tamano" class="oculto">
+    <button class="paso" id="tam-menos" aria-label="Reducir tamaño de punto">−</button>
+    <input id="tam-slider" type="range" min="0" max="1000" value="500" aria-label="Tamaño de punto" />
+    <button class="paso" id="tam-mas" aria-label="Aumentar tamaño de punto">+</button>
+    <span id="tam-valor" class="valor"></span>
+  </div>
+
+  <!-- Panel de ajustes -->
+  <section id="panel" class="oculto" aria-label="Ajustes">
+    <div id="tirador" role="button" tabindex="0" aria-label="Abrir o cerrar ajustes"><span></span></div>
+    <nav id="pestanas">
+      <button data-tab="puntos" class="activa">Puntos</button>
+      <button data-tab="color">Color</button>
+      <button data-tab="calidad">Calidad</button>
+      <button data-tab="vista">Vista</button>
+    </nav>
+    <div id="contenido"></div>
+  </section>
+
+  <input id="entrada-fichero" type="file" accept=".las,.laz,.ply,.pcd,.xyz,.txt,.csv,.asc,.pts" hidden />
+  <div id="aviso" class="oculto"></div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

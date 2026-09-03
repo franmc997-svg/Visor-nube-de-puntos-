@@ -1,0 +1,19 @@
+{
+  "name": "visor-nube-de-puntos",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Visor de nubes de puntos con color, optimizado para iPhone 14 (Safari iOS)",
+  "scripts": {
+    "dev": "vite --host",
+    "build": "vite build",
+    "preview": "vite preview --host"
+  },
+  "dependencies": {
+    "laz-perf": "^0.0.7",
+    "three": "^0.185.1"
+  },
+  "devDependencies": {
+    "vite": "^7.1.5"
+  }
+}
