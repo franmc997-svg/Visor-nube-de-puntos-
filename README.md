@@ -61,6 +61,12 @@ por ahi se abren igual.
 4. Botón **Abrir fichero** → la nube puede estar en iCloud Drive, en Archivos,
    en Dropbox o en cualquier sitio que aparezca en el selector de iOS.
 
+> El selector muestra **todos** los ficheros, sin filtrar por extension, y es a
+> proposito. iOS traduce el atributo `accept` a tipos del sistema (UTI), y no
+> conoce `.ply`, `.las`, `.laz` ni `.pcd`: con el filtro puesto los deja en gris
+> y no deja seleccionarlos. El formato se detecta por los bytes del cabecero,
+> asi que el filtro no aportaba nada.
+
 Tambien puedes pasarle una URL directa: `https://tu-sitio/?url=https://…/nube.laz`
 (el servidor de origen tiene que permitir CORS).
 
@@ -220,3 +226,8 @@ tools/
 - **Sin E57.**
 - El sistema de coordenadas del fichero (VLR de CRS) se ignora: la nube se
   dibuja en su propio sistema local.
+- **El eje vertical de un PLY es una conjetura.** El formato no lo declara, asi
+  que se deduce de la forma de la nube: si es una plancha (terreno, vuelo) la
+  vertical es la dimension menor; en cualquier otro caso se asume Z. Con una
+  fachada tan ancha como alta no hay señal que valga, por eso el visor avisa de
+  que lo ha supuesto y deja cambiarlo en la pestaña *Vista*.

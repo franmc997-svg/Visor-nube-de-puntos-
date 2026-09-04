@@ -248,11 +248,22 @@ export class App {
     this.dom.hudNombre.textContent = payload.name || 'nube';
     this.guardar();
 
+    // Los avisos se juntan en uno solo: dos mensajes seguidos en el mismo sitio
+    // hacen que el segundo pise al primero sin que nadie lea ninguno.
+    const notas = [];
     if (payload.sourceCount > payload.count) {
       const pct = ((payload.count / payload.sourceCount) * 100).toFixed(1);
-      this.aviso(`Submuestreada al ${pct} %: ${formatoNumero(payload.count)} de `
-        + `${formatoNumero(payload.sourceCount)} puntos (presupuesto de memoria).`, 6000);
+      notas.push(`Submuestreada al ${pct} %: ${formatoNumero(payload.count)} de `
+        + `${formatoNumero(payload.sourceCount)} puntos (presupuesto de memoria).`);
     }
+    if (res.ejeConjeturado) {
+      // El fichero no dice cual es la vertical, asi que la hemos deducido de la
+      // forma de la nube. Se acierta casi siempre, pero cuando no, el usuario
+      // tiene que saber que es una suposicion y donde se cambia.
+      notas.push(`Eje vertical supuesto: ${res.upAxis.toUpperCase()}. `
+        + 'Si la nube sale tumbada, cambialo en Vista.');
+    }
+    if (notas.length) this.aviso(notas.join(' '), 7000);
   }
 
   actualizarStats({ fps, drawn, activo }) {

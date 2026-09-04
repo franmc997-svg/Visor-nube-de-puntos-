@@ -189,7 +189,8 @@ export class Viewer {
     this.root.add(this.points);
 
     this.cloud = payload;
-    this.setUpAxis(payload.upAxis === 'auto' ? guessUpAxis(lo, hi) : payload.upAxis);
+    const ejeConjeturado = payload.upAxis === 'auto';
+    this.setUpAxis(ejeConjeturado ? guessUpAxis(lo, hi) : payload.upAxis);
 
     const u = this.pointMaterial.uniforms;
     u.uColorMode.value = payload.color ? COLOR_MODES.rgb : COLOR_MODES.elevacion;
@@ -200,7 +201,11 @@ export class Viewer {
     this.frameAll();
     this.setDensity(this.settings.density);
     this.needsRender = true;
-    return { colorMode: payload.color ? 'rgb' : 'elevacion' };
+    return {
+      colorMode: payload.color ? 'rgb' : 'elevacion',
+      ejeConjeturado,
+      upAxis: this.upAxis,
+    };
   }
 
   dispose() {
@@ -536,10 +541,22 @@ export class Viewer {
 
 /**
  * Heuristica de eje vertical para formatos que no lo declaran (PLY, sobre todo).
- * En una escena real la dimension vertical es casi siempre la menor de las tres.
+ *
+ * "La vertical es la dimension menor" solo vale para nubes con forma de plancha
+ * (terreno, vuelo fotogrametrico). En un escaneo de fachada la dimension menor
+ * es la PROFUNDIDAD, no la altura, y esa regla deja el edificio tumbado.
+ *
+ * Asi que solo se usa cuando la nube es realmente aplanada: las dos dimensiones
+ * mayores parecidas entre si y la tercera claramente menor. En cualquier otro
+ * caso se asume Z, que es la convencion de topografia y escaneo terrestre.
+ *
+ * Sigue siendo una conjetura: quien la use debe avisar al usuario y ofrecerle
+ * cambiarla.
  */
 function guessUpAxis(min, max) {
   const d = [max.x - min.x, max.y - min.y, max.z - min.z];
-  const i = d.indexOf(Math.min(...d));
-  return ['x', 'y', 'z'][i];
+  const ordenados = d.map((v, i) => [v, i]).sort((a, b) => b[0] - a[0]);
+  const [mayor, medio, menor] = ordenados;
+  const esPlancha = mayor[0] <= medio[0] * 1.6 && menor[0] <= medio[0] * 0.5;
+  return esPlancha ? ['x', 'y', 'z'][menor[1]] : 'z';
 }

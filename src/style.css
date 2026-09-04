@@ -243,7 +243,9 @@ input[type="range"]::-moz-range-thumb { width: 24px; height: 24px; border: none;
 #aviso {
   position: fixed;
   left: 16px; right: 16px;
-  bottom: calc(90px + var(--seguro-abajo));
+  /* Por encima de la barra de tamaño (74 px + alto): taparla justo cuando el
+     usuario acaba de cargar una nube es el peor momento posible. */
+  bottom: calc(132px + var(--seguro-abajo));
   padding: 12px 14px;
   border-radius: 12px;
   background: #7a2020;

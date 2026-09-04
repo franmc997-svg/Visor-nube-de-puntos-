@@ -65,7 +65,13 @@
     <div id="contenido"></div>
   </section>
 
-  <input id="entrada-fichero" type="file" accept=".las,.laz,.ply,.pcd,.xyz,.txt,.csv,.asc,.pts" hidden />
+  <!--
+    Sin "accept" a proposito. iOS traduce esa lista a tipos del sistema (UTI), y
+    .ply, .las, .laz y .pcd no son tipos que iOS conozca: al no poder resolverlos
+    los muestra en gris y no deja seleccionarlos. El formato se detecta por los
+    bytes del cabecero, asi que el filtro no aportaba nada y rompia el selector.
+  -->
+  <input id="entrada-fichero" type="file" hidden />
   <div id="aviso" class="oculto"></div>
 
   <script type="module" src="/src/main.js"></script>
