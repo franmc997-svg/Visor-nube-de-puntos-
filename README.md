@@ -83,6 +83,96 @@ con la camara: sin el, orbitas siempre alrededor del centro de la nube.
 
 ---
 
+## Dibujar sobre la nube
+
+### La idea: no se dibuja sobre la nube, se dibuja sobre un plano
+
+Una nube de puntos **no tiene superficie**. Son puntos sueltos con huecos entre
+ellos, asi que pegar el trazo a la profundidad de lo que hay bajo el dedo da
+lineas onduladas que siguen el ruido del escaner y que, al cruzar una ventana,
+saltan al muro del fondo.
+
+Por eso el visor hace lo mismo que las apps de croquis 3D: **fija un papel** (un
+plano de trabajo) y dibuja encima. Tocas una fachada, se ajusta un plano a los
+puntos de alrededor, y ese plano es el lienzo. El trazo sale limpio, se queda
+pegado a la nube al orbitar, y como se guarda en coordenadas 2D del plano
+(en metros), es geometria real y no una mancha en pantalla.
+
+Una **rejilla azul** marca donde esta el papel y con que inclinacion. Sin ella,
+el primer trazo siempre sorprende.
+
+### Gestos
+
+| Con que | Modo Navegar | Modo Dibujo |
+|---|---|---|
+| **Lapiz** (Apple Pencil, stylus) | **dibuja** | dibuja |
+| Un dedo | orbita | **dibuja** |
+| Dos dedos | zoom y desplazamiento | zoom y desplazamiento |
+| Raton, boton izquierdo | orbita | **dibuja** |
+| Raton, boton derecho | desplaza | desplaza |
+
+El lapiz dibuja siempre, sin tocar ningun boton, y el dedo sigue orbitando: es
+el reparto de todas las apps de croquis y no hay que aprenderlo. Con el dedo
+hace falta el boton **✎** del HUD, y ahi **dos dedos siguen moviendo la camara**
+(si aparece el segundo dedo a mitad de un trazo, ese trazo se descarta).
+
+### Como se fija el papel
+
+El primer toque en modo dibujo fija el plano. Hay cuatro formas, en la pestaña
+*Dibujo*:
+
+- **Ajustar a la nube** (por defecto) — analisis de componentes principales
+  sobre los puntos que rodean al toque: se busca el plano real de la fachada, el
+  muro o el suelo. Se hace en dos pasadas, descartando en la segunda los puntos
+  a mas de 2 sigma, porque si no un balcon o un arbol delante inclinan el papel
+  varios grados. El panel muestra la desviacion del ajuste en mm: es la medida
+  de cuanto te puedes fiar del plano.
+- **Vertical** — plano vertical de cara a la camara.
+- **Horizontal** — plano a nivel, para plantas.
+- **De frente** — perpendicular a la vista, como un cristal delante.
+
+El **radio de ajuste** decide cuanta superficie se mira: grande es mas estable
+pero se come los quiebros; pequeño sigue el detalle pero le afectan el ruido y
+los salientes.
+
+> **Papel de canto.** Por debajo de unos 15 grados de incidencia, un pixel de
+> pantalla son metros de papel y el trazo se dispara al horizonte. El visor no
+> deja dibujar ahi y te pide que gires la vista. Es el fallo clasico de dibujar
+> sobre planos, y sin esta guarda tres garabatos sobre el suelo visto en
+> escorzo salen como 600 m de linea.
+
+### Herramientas
+
+**Lapiz** (mano alzada), **Linea** (polilinea toque a toque; se cierra tocando
+sobre el ultimo vertice), **Rect.** y **Borrar** (toca un trazo y desaparece).
+Mas color, grosor, deshacer, y un suavizado que solo se aplica a la mano alzada
+(con lapiz nunca pasa de una pasada: el trazo ya viene fino).
+
+Con **Enganchar a los puntos** activado, el primer punto de cada trazo se pega
+al punto real de la nube que haya bajo el dedo, para empezar exactamente en una
+esquina.
+
+### Que sale de ahi
+
+- **Se guarda solo.** El dibujo se conserva en el navegador y vuelve a aparecer
+  al reabrir la misma nube (la clave es nombre + numero de puntos + bounding
+  box, que en la practica es una huella del fichero).
+- **Fichero `.json`** con los trazos, para llevartelo a otro dispositivo.
+- **PLY o LAS** con el dibujo convertido en puntos coloreados, opcionalmente
+  **con la nube entera dentro**. El LAS sale en 1.2 formato 2, con la
+  georreferencia intacta (escala de 1 mm y offset en el cabecero), asi que se
+  puede volver a abrir en este visor, en CloudCompare o en lo que sea.
+
+> Exportar la nube entera en un iPhone son cientos de MB: el fichero se monta
+> por trozos para no reservar un solo bloque gigante, pero sigue siendo la
+> operacion mas cara de la aplicacion. Por defecto se exporta solo el dibujo.
+
+**Lo que todavia no hay: DXF.** Los trazos ya viven en coordenadas 2D del plano,
+que es exactamente lo que necesita un alzado a escala; falta escribir el fichero.
+Mientras tanto, lo que exportas son puntos: se ven, no se acotan.
+
+---
+
 ## El ajuste fino del tamaño de punto
 
 Es el control que mas cambia la calidad percibida, asi que esta siempre visible
@@ -201,10 +291,15 @@ src/
     las.js       LAS 1.0-1.4, formatos de punto 0-10
     laz.js       LAZ via laz-perf (WASM), carga diferida
     ply.js  pcd.js  xyz.js
+    exportar.js  escritura de PLY binario y LAS 1.2
   viewer/
     Viewer.js    escena, camara, LOD, seleccion por profundidad
     shaders.js   puntos, Eye-Dome Lighting y empaquetado de profundidad
     colormaps.js rampas y paleta de clases ASPRS
+  dibujo/
+    Dibujo.js    gestos, herramientas, deshacer, persistencia
+    plano.js     planos de trabajo y ajuste PCA a la nube
+    trazos.js    polilineas en coordenadas del papel, simplificado y suavizado
   ui/
     app.js       estado, carga, panel
     controls.js  fabricas de controles tactiles
@@ -222,7 +317,11 @@ tools/
   chunks, asi que no se puede descomprimir por bloques. Un `.laz` de mas de
   ~250 MB es arriesgado en un iPhone.
 - **Sin medicion ni secciones**: no hay herramientas de distancia, perfil ni
-  recorte. Es un visor, no CloudCompare.
+  recorte. Es un visor con anotacion, no CloudCompare.
+- **El dibujo no sale a DXF todavia**: se exporta como puntos coloreados dentro
+  del PLY/LAS, que se ven pero no se acotan ni se editan en CAD.
+- **Cada trazo vive en un plano**: no hay trazos que envuelvan una esquina. Para
+  la fachada de al lado se fija un papel nuevo.
 - **Sin E57.**
 - El sistema de coordenadas del fichero (VLR de CRS) se ignora: la nube se
   dibuja en su propio sistema local.

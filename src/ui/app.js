@@ -1,5 +1,9 @@
 import { Viewer } from '../viewer/Viewer.js';
 import { COLORMAPS } from '../viewer/colormaps.js';
+import { Dibujo, COLORES } from '../dibujo/Dibujo.js';
+import {
+  fuenteCombinada, escribirPLY, escribirLAS, extremos, descargar,
+} from '../io/exportar.js';
 import {
   el, slider, segmentado, conmutador, boton, bloqueInfo,
   logMap, formatoLongitud, formatoNumero,
@@ -33,6 +37,12 @@ const AJUSTES_POR_DEFECTO = {
   densidad: 1,
   densidadMovimiento: 0.4,
   dprMax: 2,
+  dibujoColor: '#ff3b30',
+  dibujoGrosor: 3,
+  dibujoSuavizado: 1,
+  dibujoModoPlano: 'ajuste',
+  dibujoAjustar: true,
+  dibujoIncluirNube: false,
 };
 
 function cargarAjustes() {
@@ -67,6 +77,13 @@ export class App {
       tamMas: document.getElementById('tam-mas'),
       tamValor: document.getElementById('tam-valor'),
       entrada: document.getElementById('entrada-fichero'),
+      entradaDibujo: document.getElementById('entrada-dibujo'),
+      btnDibujar: document.getElementById('btn-dibujar'),
+      barraDibujo: document.getElementById('barra-dibujo'),
+      dibColores: document.getElementById('dib-colores'),
+      dibColor: document.getElementById('dib-color'),
+      dibDeshacer: document.getElementById('dib-deshacer'),
+      dibTerminar: document.getElementById('dib-terminar'),
       btnAbrir: document.getElementById('btn-abrir'),
       btnUrl: document.getElementById('btn-url'),
       btnEncuadrar: document.getElementById('btn-encuadrar'),
@@ -76,6 +93,9 @@ export class App {
     this.ajustes = cargarAjustes();
     this.viewer = new Viewer(this.dom.canvas);
     this.viewer.onStats = (s) => this.actualizarStats(s);
+    this.dibujo = new Dibujo(this.viewer);
+    this.dibujo.onCambio = () => { this._sincronizarDibujo(); this._guardarDibujoDiferido(); };
+    this.dibujo.onMensaje = (t) => this.aviso(t, 4000);
     this.tab = 'puntos';
     this.controles = {};
 
@@ -136,6 +156,7 @@ export class App {
     document.addEventListener('dblclick', (e) => e.preventDefault(), { passive: false });
 
     this._doblePulsacion();
+    this._conectarDibujo();
 
     this.dom.canvas.addEventListener('webglcontextlost', (e) => {
       e.preventDefault();
@@ -163,6 +184,9 @@ export class App {
   _doblePulsacion() {
     let ultimo = 0, ux = 0, uy = 0;
     this.dom.canvas.addEventListener('pointerup', (e) => {
+      // En modo dibujo (o con lapiz) el doble toque es parte del trazo, no un
+      // cambio de centro de giro.
+      if (this.dibujo.modo === 'dibujar' || e.pointerType === 'pen') return;
       const ahora = performance.now();
       const cerca = Math.hypot(e.clientX - ux, e.clientY - uy) < 34;
       if (ahora - ultimo < 320 && cerca) {
@@ -180,6 +204,10 @@ export class App {
     const cerrado = this.dom.panel.classList.toggle('cerrado');
     // Con el panel abierto la barra rapida quedaria enterrada debajo.
     this.dom.barraTamano.classList.toggle('bajo-panel', !cerrado);
+    this.dom.barraDibujo.classList.toggle('bajo-panel', !cerrado);
+    // El panel puede llevar rato cerrado mientras se dibuja: al abrirlo hay que
+    // refrescar lo que muestra o se leen numeros viejos.
+    if (!cerrado) this._sincronizarDibujo();
     return cerrado;
   }
 
@@ -237,6 +265,9 @@ export class App {
 
     const res = this.viewer.setPointCloud(payload);
     this.nube = payload;
+    this.dibujo.reiniciar();
+    this.dibujo.setModo('navegar');
+    this._aplicarAjustesDibujo();
 
     // Si el fichero no trae color, RGB no tiene sentido: caemos a elevacion.
     if (!payload.color && this.ajustes.modoColor === 'rgb') this.ajustes.modoColor = 'elevacion';
@@ -263,7 +294,187 @@ export class App {
       notas.push(`Eje vertical supuesto: ${res.upAxis.toUpperCase()}. `
         + 'Si la nube sale tumbada, cambialo en Vista.');
     }
+    const restaurados = this._restaurarDibujo();
+    if (restaurados) {
+      notas.push(`Dibujo restaurado: ${restaurados} trazo${restaurados === 1 ? '' : 's'} `
+        + 'de la ultima sesion con esta nube.');
+    }
     if (notas.length) this.aviso(notas.join(' '), 7000);
+  }
+
+  // --- dibujo ----------------------------------------------------------------
+
+  _conectarDibujo() {
+    const d = this.dom;
+    d.btnDibujar.addEventListener('click', () => {
+      if (!this.nube) { this.aviso('Primero abre una nube.'); return; }
+      this.dibujo.setModo(this.dibujo.modo === 'dibujar' ? 'navegar' : 'dibujar');
+      if (this.dibujo.modo === 'dibujar' && !this.dibujo.planoActivo) {
+        this.aviso('Toca la superficie donde quieras dibujar: ahi se fija el papel.', 5000);
+      }
+    });
+
+    d.barraDibujo.addEventListener('click', (e) => {
+      const b = e.target.closest('button[data-herramienta]');
+      if (!b) return;
+      this.dibujo.setHerramienta(b.dataset.herramienta);
+    });
+    d.dibColor.addEventListener('click', () => d.dibColores.classList.toggle('oculto'));
+    d.dibDeshacer.addEventListener('click', () => {
+      if (!this.dibujo.deshacer()) this.aviso('No queda nada que deshacer.');
+    });
+    d.dibTerminar.addEventListener('click', () => this.dibujo.terminarPolilinea());
+
+    for (const c of COLORES) {
+      const b = el('button', 'tinta');
+      b.dataset.color = c.id;
+      b.setAttribute('aria-label', c.label);
+      const punto = el('span');
+      punto.style.background = c.id;
+      b.appendChild(punto);
+      b.addEventListener('click', () => {
+        this.cambiar('dibujoColor', c.id);
+        d.dibColores.classList.add('oculto');
+      });
+      d.dibColores.appendChild(b);
+    }
+
+    d.entradaDibujo.addEventListener('change', async () => {
+      const f = d.entradaDibujo.files?.[0];
+      d.entradaDibujo.value = '';
+      if (!f) return;
+      try {
+        const n = this.dibujo.cargar(JSON.parse(await f.text()));
+        this.aviso(`Dibujo cargado: ${n} trazos.`);
+      } catch (err) {
+        this.error(`No he podido leer ese dibujo: ${err.message}`);
+      }
+    });
+
+    const muestra = el('span');
+    muestra.style.background = this.ajustes.dibujoColor;
+    d.dibColor.appendChild(muestra);
+  }
+
+  _aplicarAjustesDibujo() {
+    const a = this.ajustes;
+    const dib = this.dibujo;
+    dib.setColor(a.dibujoColor);
+    dib.setGrosor(a.dibujoGrosor);
+    dib.suavizado = a.dibujoSuavizado;
+    dib.modoPlano = a.dibujoModoPlano;
+    dib.ajustarAPuntos = a.dibujoAjustar;
+  }
+
+  /** Refleja en la interfaz el estado del dibujo (modo, herramienta, color). */
+  _sincronizarDibujo() {
+    const d = this.dom;
+    const dib = this.dibujo;
+    const dibujando = dib.modo === 'dibujar';
+    d.btnDibujar.classList.toggle('activa', dibujando);
+    d.barraDibujo.classList.toggle('oculto', !dibujando || !this.nube);
+    for (const b of d.barraDibujo.querySelectorAll('button[data-herramienta]')) {
+      b.classList.toggle('activa', b.dataset.herramienta === dib.herramienta);
+    }
+    for (const b of d.dibColores.querySelectorAll('button[data-color]')) {
+      b.classList.toggle('activa', b.dataset.color === dib.color);
+    }
+    const muestra = d.dibColor.firstElementChild;
+    if (muestra) muestra.style.background = dib.color;
+    d.dibTerminar.classList.toggle('oculto', !dib.hayPolilineaAbierta);
+    if (this.tab === 'dibujo' && !d.panel.classList.contains('cerrado')) this._infoDibujo?.();
+  }
+
+  // --- guardar y recuperar el dibujo ----------------------------------------
+
+  /**
+   * Clave de guardado por nube. Nombre y numero de puntos no bastan: dos
+   * escaneos del mismo dia se llaman igual. Se añade el bbox redondeado, que
+   * es practicamente una huella del fichero.
+   */
+  _claveDibujo() {
+    const n = this.nube;
+    if (!n) return null;
+    const caja = [...n.min, ...n.max].map((x) => Math.round(x * 100)).join('_');
+    return `visor-dibujo:${n.name || 'nube'}:${n.count}:${caja}`;
+  }
+
+  _guardarDibujoDiferido() {
+    clearTimeout(this._dibujoT);
+    this._dibujoT = setTimeout(() => this._guardarDibujo(), 800);
+  }
+
+  _guardarDibujo() {
+    const clave = this._claveDibujo();
+    if (!clave) return;
+    try {
+      if (!this.dibujo.hayDibujo) localStorage.removeItem(clave);
+      else localStorage.setItem(clave, JSON.stringify(this.dibujo.serializar()));
+      this._avisoCuota = false;
+    } catch {
+      // El dibujo cabe de sobra en los 5 MB de localStorage salvo casos raros;
+      // si no cabe, se avisa una vez y se sigue trabajando en memoria.
+      if (!this._avisoCuota) {
+        this._avisoCuota = true;
+        this.error('No puedo guardar el dibujo en este navegador (sin espacio o modo privado). '
+          + 'Exportalo a fichero desde la pestaña Dibujo para no perderlo.');
+      }
+    }
+  }
+
+  _restaurarDibujo() {
+    const clave = this._claveDibujo();
+    if (!clave) return 0;
+    try {
+      const raw = localStorage.getItem(clave);
+      if (!raw) return 0;
+      return this.dibujo.cargar(JSON.parse(raw));
+    } catch {
+      return 0;
+    }
+  }
+
+  // --- exportar --------------------------------------------------------------
+
+  _exportar(formato) {
+    if (!this.dibujo.hayDibujo) { this.aviso('No hay ningun trazo que exportar.'); return; }
+    const incluirNube = this.ajustes.dibujoIncluirNube;
+    const espaciado = this.viewer.defaultWorldSize || 0.01;
+    // Los trazos se muestrean a la mitad del espaciado de la nube: asi la linea
+    // se lee como una linea y no como una fila de puntos sueltos.
+    const puntos = this.dibujo.puntosParaExportar(espaciado * 0.5);
+    const fuente = fuenteCombinada({ nube: this.nube, dibujo: puntos, incluirNube });
+
+    if (incluirNube && this.nube.count > 4_000_000) {
+      this.aviso('Exportando la nube entera: puede tardar y consumir mucha memoria.', 6000);
+    }
+
+    const base = (this.nube.name || 'nube').replace(/\.[^.]+$/, '');
+    const sufijo = incluirNube ? 'con-dibujo' : 'dibujo';
+    try {
+      if (formato === 'ply') {
+        descargar(escribirPLY(fuente), `${base}-${sufijo}.ply`);
+      } else {
+        const o = this.nube.origin;
+        const caja = incluirNube
+          ? {
+            min: [this.nube.min[0] - o[0], this.nube.min[1] - o[1], this.nube.min[2] - o[2]],
+            max: [this.nube.max[0] - o[0], this.nube.max[1] - o[1], this.nube.max[2] - o[2]],
+          }
+          : extremos(fuente, o);
+        descargar(escribirLAS(fuente, { ...caja, origen: o }), `${base}-${sufijo}.las`);
+      }
+      this.aviso(`Exportados ${formatoNumero(fuente.count)} puntos.`);
+    } catch (err) {
+      this.error(`No he podido generar el fichero: ${err.message}`);
+    }
+  }
+
+  _exportarSesion() {
+    if (!this.dibujo.hayDibujo) { this.aviso('No hay ningun trazo que guardar.'); return; }
+    const base = (this.nube?.name || 'nube').replace(/\.[^.]+$/, '');
+    const blob = new Blob([JSON.stringify(this.dibujo.serializar())], { type: 'application/json' });
+    descargar(blob, `${base}-dibujo.json`);
   }
 
   actualizarStats({ fps, drawn, activo }) {
@@ -345,6 +556,8 @@ export class App {
     v.settings.interactiveDensity = a.densidadMovimiento;
     v.setDensity(a.densidad);
     v.setMaxPixelRatio(a.dprMax);
+    this._aplicarAjustesDibujo();
+    this._sincronizarDibujo();
     this._sincronizarBarraTamano();
   }
 
@@ -373,6 +586,7 @@ export class App {
   _renderTab() {
     const c = this.dom.contenido;
     c.innerHTML = '';
+    this._infoDibujo = null;
     const add = (ctrl) => { for (const n of ctrl.nodes) c.appendChild(n); return ctrl; };
     const a = this.ajustes;
     const v = this.viewer;
@@ -583,6 +797,128 @@ export class App {
         info.set('Sin nube cargada.');
       }
     }
+
+    if (this.tab === 'dibujo') this._tabDibujo(add, a);
+  }
+
+  /**
+   * Pestaña de dibujo.
+   *
+   * El orden importa: primero el papel (sin plano no hay nada que hacer),
+   * luego el trazo, y al final guardar/exportar.
+   */
+  _tabDibujo(add, a) {
+    const dib = this.dibujo;
+
+    add(conmutador({
+      label: 'Modo dibujo',
+      value: dib.modo === 'dibujar',
+      help: 'Con el lapiz (Apple Pencil) no hace falta activarlo: el lapiz dibuja siempre y el '
+        + 'dedo sigue orbitando. Con el dedo, en modo dibujo un dedo dibuja y dos dedos giran.',
+      onChange: (on) => { dib.setModo(on ? 'dibujar' : 'navegar'); this._renderTab(); },
+    }));
+
+    add(segmentado({
+      label: 'Como se fija el papel',
+      value: a.dibujoModoPlano,
+      options: [
+        { id: 'ajuste', label: 'Ajustar a la nube' },
+        { id: 'vertical', label: 'Vertical' },
+        { id: 'horizontal', label: 'Horizontal' },
+        { id: 'camara', label: 'De frente' },
+      ],
+      help: 'Ajustar a la nube busca el plano real de la superficie que tocas (una fachada, un '
+        + 'muro, el suelo) con los puntos de alrededor. Es lo que quieres casi siempre. Los otros '
+        + 'tres imponen la orientacion sin mirar la nube.',
+      onChange: (id) => { this.ajustes.dibujoModoPlano = id; dib.modoPlano = id; this.guardarDiferido(); },
+    }));
+
+    add(boton('Fijar un papel nuevo (toca la nube)', () => {
+      dib.planoActivo = null;
+      dib.setModo('dibujar');
+      this.aviso('Toca la superficie donde quieras dibujar.', 5000);
+      this._alternarPanel();
+      this._renderTab();
+    }, 'secundario'));
+
+    const base = dib._radioPorDefecto();
+    add(slider({
+      label: 'Radio de ajuste', min: base / 6, max: base * 6, step: base / 60,
+      value: dib.radioAjuste || base,
+      format: (x) => formatoLongitud(x),
+      help: 'Cuanta superficie se usa para calcular el plano. Grande = mas estable pero se come '
+        + 'los quiebros; pequeño = sigue el detalle pero le afecta el ruido y los balcones.',
+      onInput: (x) => { dib.radioAjuste = x; dib._actualizarRejilla(); },
+    }));
+
+    add(conmutador({
+      label: 'Ver la rejilla del papel',
+      value: dib.verRejilla,
+      help: 'Dibuja una cuadricula sobre el plano de trabajo. Es lo unico que deja ver de un '
+        + 'vistazo donde esta el papel y con que inclinacion.',
+      onChange: (on) => { dib.verRejilla = on; dib._actualizarRejilla(); },
+    }));
+
+    add(slider({
+      label: 'Grosor del trazo', min: 1, max: 12, step: 0.5, value: a.dibujoGrosor,
+      format: (x) => `${x} px`,
+      onInput: (x) => { this.cambiar('dibujoGrosor', x); this._aplicarAjustesDibujo(); },
+    }));
+
+    add(segmentado({
+      label: 'Suavizado',
+      value: String(a.dibujoSuavizado),
+      options: [
+        { id: '0', label: 'Ninguno' },
+        { id: '1', label: 'Suave' },
+        { id: '2', label: 'Mucho' },
+      ],
+      help: 'Solo afecta al trazo a mano alzada. Con el dedo, sin suavizado el trazo sale '
+        + 'tembloroso; con lapiz nunca se aplica mas de una pasada.',
+      onChange: (id) => { this.cambiar('dibujoSuavizado', Number(id)); this._aplicarAjustesDibujo(); },
+    }));
+
+    add(conmutador({
+      label: 'Enganchar a los puntos',
+      value: a.dibujoAjustar,
+      help: 'El primer punto de cada trazo se pega al punto real de la nube que hay bajo el dedo, '
+        + 'si esta cerca del papel. Sirve para empezar exactamente en una esquina.',
+      onChange: (on) => { this.cambiar('dibujoAjustar', on); this._aplicarAjustesDibujo(); },
+    }));
+
+    add(boton('Borrar todo el dibujo', () => {
+      if (!dib.hayDibujo) { this.aviso('No hay nada dibujado.'); return; }
+      dib.borrarTodo();
+      this.aviso('Dibujo borrado. Se puede deshacer.');
+    }, 'secundario'));
+
+    add(boton('Guardar el dibujo en un fichero', () => this._exportarSesion(), 'secundario'));
+    add(boton('Abrir un dibujo guardado', () => this.dom.entradaDibujo.click(), 'secundario'));
+
+    add(conmutador({
+      label: 'Exportar tambien la nube',
+      value: a.dibujoIncluirNube,
+      help: 'Apagado exporta solo el dibujo (unos pocos miles de puntos). Encendido mete la nube '
+        + 'entera en el fichero: son cientos de MB y en un iPhone puede tumbar la pestaña.',
+      onChange: (on) => this.cambiar('dibujoIncluirNube', on),
+    }));
+    add(boton('Exportar a PLY', () => this._exportar('ply'), 'secundario'));
+    add(boton('Exportar a LAS', () => this._exportar('las'), 'secundario'));
+
+    const info = add(bloqueInfo());
+    this._infoDibujo = () => {
+      const p = dib.planoActivo;
+      const largo = dib.trazos.reduce((x, t) => x + t.longitud(), 0);
+      info.set(`
+        <div>Papel: <b>${p ? 'fijado' : 'sin fijar'}</b>${
+          p && p.rms ? ` · desviacion del ajuste <b>${(p.rms * 1000).toFixed(0)} mm</b>` : ''}</div>
+        <div>Trazos: <b>${dib.trazos.length}</b> · Longitud dibujada: <b>${formatoLongitud(largo)}</b></div>
+        <div>Planos usados: <b>${dib.planos.size}</b></div>
+        <div style="margin-top:10px">El dibujo se guarda solo en este navegador y vuelve a
+        aparecer al reabrir la misma nube.</div>
+      `);
+    };
+    this._infoDibujo();
   }
 
   // --- avisos ----------------------------------------------------------------

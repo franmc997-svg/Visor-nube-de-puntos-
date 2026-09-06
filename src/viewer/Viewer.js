@@ -132,6 +132,15 @@ export class Viewer {
     this.cloud = null;
     this.upAxis = 'z';
 
+    // Capa del dibujo. Cuelga de `root` (no de la escena) para que los trazos
+    // acompañen a la nube cuando se corrige el eje vertical, y se dibuja en la
+    // misma pasada que los puntos: asi el EDL y la profundidad la tratan igual
+    // que al resto de la escena y un trazo que queda detras del edificio se
+    // oculta como es debido.
+    this.overlay = new THREE.Group();
+    this.overlay.frustumCulled = false;
+    this.root.add(this.overlay);
+
     // Calidad adaptativa
     this.settings = {
       density: 1.0,            // fraccion de puntos dibujados en reposo
@@ -297,6 +306,10 @@ export class Viewer {
 
     const prevMat = this.points.material;
     this.points.material = this.pickMaterial;
+    // Los trazos escriben profundidad: si se colasen en el pase de seleccion,
+    // tocar encima de uno devolveria la profundidad del trazo, no la del punto.
+    const overlayVisible = this.overlay.visible;
+    this.overlay.visible = false;
     this.pickMaterial.uniforms.uFar.value = this.camera.far;
     const prevRange = this.points.geometry.drawRange.count;
     this.points.geometry.setDrawRange(0, this.cloud.count);
@@ -310,6 +323,7 @@ export class Viewer {
     this.renderer.setRenderTarget(null);
 
     this.points.material = prevMat;
+    this.overlay.visible = overlayVisible;
     this.points.geometry.setDrawRange(0, prevRange);
     this.camera.clearViewOffset();
     this.camera.updateProjectionMatrix();

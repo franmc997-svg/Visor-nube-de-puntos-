@@ -148,6 +148,58 @@ button {
 #barra-tamano.bajo-panel { opacity: 0; pointer-events: none; transform: translateY(8px); }
 #barra-tamano .valor { flex: none; min-width: 62px; text-align: right; font-variant-numeric: tabular-nums; font-size: 12px; color: var(--tenue); }
 
+/* --- barra de dibujo -------------------------------------------------------- */
+
+#barra-dibujo {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  bottom: calc(130px + var(--seguro-abajo));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  border-radius: 16px;
+  background: var(--panel);
+  border: 1px solid var(--borde);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  transition: opacity 0.18s, transform 0.18s;
+  z-index: 12;
+}
+#barra-dibujo.bajo-panel { opacity: 0; pointer-events: none; transform: translateY(8px); }
+#barra-dibujo .fila-herramientas,
+#barra-dibujo .fila-colores { display: flex; gap: 6px; align-items: center; }
+
+.hdib {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 40px;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.07);
+  border: 1px solid var(--borde);
+  color: var(--texto);
+  font-size: 12px;
+  padding: 0 6px;
+  white-space: nowrap;
+}
+.hdib.activa { background: var(--acento-tenue); border-color: rgba(77,163,255,0.45); color: var(--acento); font-weight: 600; }
+.hdib:active { background: var(--acento-tenue); }
+.hdib.muestra { flex: none; width: 40px; padding: 0; }
+.hdib.muestra span { display: block; width: 20px; height: 20px; margin: 0 auto; border-radius: 50%; border: 1px solid rgba(255,255,255,0.5); }
+
+.tinta {
+  flex: 1 1 auto;
+  height: 36px;
+  border-radius: 10px;
+  border: 2px solid transparent;
+  background: transparent;
+}
+.tinta span { display: block; width: 100%; height: 22px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.35); }
+.tinta.activa { border-color: var(--acento); }
+
+#btn-dibujar.activa { background: var(--acento-tenue); color: var(--acento); }
+
 /* --- panel de ajustes ------------------------------------------------------- */
 
 #panel {

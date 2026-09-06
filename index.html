@@ -42,7 +42,22 @@
       <span id="hud-nombre"></span>
       <span id="hud-stats" class="tenue"></span>
     </div>
+    <button id="btn-dibujar" class="icono" title="Modo dibujo" aria-label="Activar modo dibujo">✎</button>
     <button id="btn-encuadrar" class="icono" title="Encuadrar todo" aria-label="Encuadrar todo">⤢</button>
+  </div>
+
+  <!-- Barra de dibujo: solo aparece en modo dibujo -->
+  <div id="barra-dibujo" class="oculto">
+    <div id="dib-colores" class="fila-colores oculto"></div>
+    <div class="fila-herramientas">
+      <button class="hdib activa" data-herramienta="lapiz">Lapiz</button>
+      <button class="hdib" data-herramienta="polilinea">Linea</button>
+      <button class="hdib" data-herramienta="rectangulo">Rect.</button>
+      <button class="hdib" data-herramienta="borrador">Borrar</button>
+      <button class="hdib muestra" id="dib-color" aria-label="Color del trazo"></button>
+      <button class="hdib" id="dib-deshacer" aria-label="Deshacer">&#8630;</button>
+      <button class="hdib oculto" id="dib-terminar" aria-label="Terminar la linea">&#10003;</button>
+    </div>
   </div>
 
   <!-- Control rapido de tamaño de punto, siempre visible -->
@@ -61,6 +76,7 @@
       <button data-tab="color">Color</button>
       <button data-tab="calidad">Calidad</button>
       <button data-tab="vista">Vista</button>
+      <button data-tab="dibujo">Dibujo</button>
     </nav>
     <div id="contenido"></div>
   </section>
@@ -72,6 +88,7 @@
     bytes del cabecero, asi que el filtro no aportaba nada y rompia el selector.
   -->
   <input id="entrada-fichero" type="file" hidden />
+  <input id="entrada-dibujo" type="file" accept=".json,application/json" hidden />
   <div id="aviso" class="oculto"></div>
 
   <script type="module" src="/src/main.js"></script>
