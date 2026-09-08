@@ -43,6 +43,8 @@ const AJUSTES_POR_DEFECTO = {
   dibujoModoPlano: 'ajuste',
   dibujoAjustar: true,
   dibujoIncluirNube: false,
+  dibujoEnganche: true,
+  dibujoDesplazamiento: 46,
 };
 
 function cargarAjustes() {
@@ -84,6 +86,8 @@ export class App {
       dibColor: document.getElementById('dib-color'),
       dibDeshacer: document.getElementById('dib-deshacer'),
       dibTerminar: document.getElementById('dib-terminar'),
+      mira: document.getElementById('mira'),
+      cota: document.getElementById('cota'),
       btnAbrir: document.getElementById('btn-abrir'),
       btnUrl: document.getElementById('btn-url'),
       btnEncuadrar: document.getElementById('btn-encuadrar'),
@@ -96,6 +100,8 @@ export class App {
     this.dibujo = new Dibujo(this.viewer);
     this.dibujo.onCambio = () => { this._sincronizarDibujo(); this._guardarDibujoDiferido(); };
     this.dibujo.onMensaje = (t) => this.aviso(t, 4000);
+    this.dibujo.onMira = (s) => this._mira(s);
+    this.dibujo.onCota = (t) => this._cota(t);
     this.tab = 'puntos';
     this.controles = {};
 
@@ -364,6 +370,25 @@ export class App {
     dib.suavizado = a.dibujoSuavizado;
     dib.modoPlano = a.dibujoModoPlano;
     dib.ajustarAPuntos = a.dibujoAjustar;
+    dib.engancheOrtogonal = a.dibujoEnganche;
+    dib.desplazamientoTactil = a.dibujoDesplazamiento;
+  }
+
+  /** Mira de punteria: sigue al dedo, desplazada para que no la tape. */
+  _mira(s) {
+    const m = this.dom.mira;
+    if (!s) { m.classList.add('oculto'); return; }
+    m.style.left = `${s.x}px`;
+    m.style.top = `${s.y}px`;
+    m.classList.remove('oculto');
+  }
+
+  /** Medida del segmento en curso, arriba y en el centro. */
+  _cota(texto) {
+    const c = this.dom.cota;
+    if (!texto) { c.classList.add('oculto'); return; }
+    c.textContent = texto;
+    c.classList.remove('oculto');
   }
 
   /** Refleja en la interfaz el estado del dibujo (modo, herramienta, color). */
@@ -876,6 +901,24 @@ export class App {
       help: 'Solo afecta al trazo a mano alzada. Con el dedo, sin suavizado el trazo sale '
         + 'tembloroso; con lapiz nunca se aplica mas de una pasada.',
       onChange: (id) => { this.cambiar('dibujoSuavizado', Number(id)); this._aplicarAjustesDibujo(); },
+    }));
+
+    add(conmutador({
+      label: 'Enganchar a rectas y vertices',
+      value: a.dibujoEnganche,
+      help: 'Los vertices se pegan a los de otros trazos, y los segmentos que se quedan a menos '
+        + 'de 7 grados de la horizontal, la vertical o 45 grados se enderezan solos. Es lo que '
+        + 'permite dibujar recto con el dedo.',
+      onChange: (on) => { this.cambiar('dibujoEnganche', on); this._aplicarAjustesDibujo(); },
+    }));
+
+    add(slider({
+      label: 'Separacion de la mira', min: 0, max: 90, step: 2, value: a.dibujoDesplazamiento,
+      format: (x) => (x ? `${x} px` : 'sin mira'),
+      help: 'El dedo tapa justo el punto que estas señalando. Con esto se dibuja por encima del '
+        + 'contacto y la cruz te dice exactamente donde va a caer. A 0 se desactiva (util con '
+        + 'lapiz o raton, que no tapan nada).',
+      onInput: (x) => { this.cambiar('dibujoDesplazamiento', x); this._aplicarAjustesDibujo(); },
     }));
 
     add(conmutador({

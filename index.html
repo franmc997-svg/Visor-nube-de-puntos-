@@ -50,8 +50,8 @@
   <div id="barra-dibujo" class="oculto">
     <div id="dib-colores" class="fila-colores oculto"></div>
     <div class="fila-herramientas">
-      <button class="hdib activa" data-herramienta="lapiz">Lapiz</button>
-      <button class="hdib" data-herramienta="polilinea">Linea</button>
+      <button class="hdib" data-herramienta="lapiz">Lapiz</button>
+      <button class="hdib activa" data-herramienta="polilinea">Linea</button>
       <button class="hdib" data-herramienta="rectangulo">Rect.</button>
       <button class="hdib" data-herramienta="borrador">Borrar</button>
       <button class="hdib muestra" id="dib-color" aria-label="Color del trazo"></button>
@@ -89,6 +89,10 @@
   -->
   <input id="entrada-fichero" type="file" hidden />
   <input id="entrada-dibujo" type="file" accept=".json,application/json" hidden />
+  <!-- Mira de punteria: el dedo tapa el punto, asi que se apunta por encima -->
+  <div id="mira" class="oculto"><span class="h"></span><span class="v"></span></div>
+  <!-- Medida en vivo del segmento que se esta dibujando -->
+  <div id="cota" class="oculto"></div>
   <div id="aviso" class="oculto"></div>
 
   <script type="module" src="/src/main.js"></script>

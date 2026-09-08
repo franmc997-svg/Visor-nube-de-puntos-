@@ -21,6 +21,9 @@ import { Trazo, simplificar, suavizar, rectangulo } from './trazos.js';
 
 const UNO_INACTIVO = -1;   // cualquier valor que no sea de THREE.TOUCH/THREE.MOUSE
 const SENO_MINIMO = Math.sin(THREE.MathUtils.degToRad(15));
+const PASO_ANGULO = Math.PI / 4;                                   // enganche cada 45 grados
+const TOLERANCIA_ANGULO = THREE.MathUtils.degToRad(7);
+const DESPLAZAMIENTO_TACTIL = 46;                                  // px por encima del dedo
 
 export const COLORES = [
   { id: '#ff3b30', label: 'Rojo' },
@@ -42,24 +45,32 @@ export class Dibujo {
     this.trazos = [];
 
     this.modo = 'navegar';
-    this.herramienta = 'lapiz';
+    // Con el dedo, el trazo libre no da precision: la herramienta util por
+    // defecto es la polilinea con enganche.
+    this.herramienta = 'polilinea';
     this.color = COLORES[0].id;
     this.grosor = 3;
     this.suavizado = 1;
     this.ajustarAPuntos = true;
     this.modoPlano = 'ajuste';    // ajuste | vertical | horizontal | camara
     this.radioAjuste = 0;         // 0 = automatico segun el tamaño de la nube
+    this.engancheOrtogonal = true;
+    this.desplazamientoTactil = DESPLAZAMIENTO_TACTIL;
 
     this.pila = [];               // acciones para deshacer
     this.rehacerPila = [];
     this.onCambio = null;
     this.onMensaje = null;
+    this.onMira = null;           // mira de puntería: (x,y) de pantalla o null
+    this.onCota = null;           // medida en vivo: texto o null
 
     this.rejilla = null;
     this.verRejilla = true;
     this._punteros = new Set();
     this._trazoActivo = null;
     this._trazoEnCurso = null;    // polilinea a medias entre toques
+    this._pendiente = null;       // vertice que se esta arrastrando
+    this._vistaPrevia = null;     // linea fantasma hasta el dedo
     this._ultimoRebuild = 0;
     this._rayo = new THREE.Raycaster();
     this._planoTHREE = new THREE.Plane();
@@ -74,6 +85,9 @@ export class Dibujo {
   /** Se llama al cargar una nube nueva: fuera todo lo dibujado. */
   reiniciar() {
     for (const t of this.trazos) t.destruir();
+    this._quitarVistaPrevia();
+    this._pendiente = null;
+    this._cota(null);
     this.trazos = [];
     this.planos.clear();
     this.planoActivo = null;
@@ -326,35 +340,114 @@ export class Dibujo {
     return true;
   }
 
+  /**
+   * Punto de pantalla efectivo.
+   *
+   * Con el dedo se apunta unos milimetros POR ENCIMA del contacto. La yema tapa
+   * exactamente lo que estas señalando: en un movil eso son 8-10 mm de
+   * incertidumbre, y es la razon de que el trazo "no caiga donde apuntas". Con
+   * el desplazamiento y la mira dibujada, apuntas mirando en vez de adivinando.
+   * Con lapiz o raton no hace falta y no se aplica.
+   */
+  _puntoPantalla(e) {
+    const dy = e.pointerType === 'touch' ? this.desplazamientoTactil : 0;
+    return { x: e.clientX, y: e.clientY - dy };
+  }
+
+  /**
+   * Enganches, en orden de prioridad.
+   *
+   *  1. A vertices ya dibujados, para que las lineas se toquen de verdad y no
+   *     "casi".
+   *  2. A los ejes del papel cada 45 grados. En una fachada, recto significa a
+   *     nivel y a plomo, y eso a pulso no sale nunca.
+   *
+   * @param {object} p    punto libre en coordenadas del papel
+   * @param {object} ref  vertice anterior, si lo hay (para el enganche angular)
+   */
+  _enganchar(p, ref) {
+    const mpp = this._metrosPorPixel();
+    let mejor = null, mejorD = mpp * 16;
+    for (const t of this.trazos) {
+      if (t.plano !== this.planoActivo) continue;
+      for (let i = 0; i < t.numeroDePuntos; i++) {
+        const u = t.puntos[i * 2], v = t.puntos[i * 2 + 1];
+        const d = Math.hypot(p.u - u, p.v - v);
+        if (d < mejorD) { mejorD = d; mejor = { u, v }; }
+      }
+    }
+    if (mejor) return { u: mejor.u, v: mejor.v, tipo: 'vertice' };
+
+    if (ref && this.engancheOrtogonal) {
+      const du = p.u - ref.u, dv = p.v - ref.v;
+      if (Math.hypot(du, dv) > mpp) {
+        const angulo = Math.atan2(dv, du);
+        const objetivo = Math.round(angulo / PASO_ANGULO) * PASO_ANGULO;
+        let desvio = angulo - objetivo;
+        while (desvio > Math.PI) desvio -= 2 * Math.PI;
+        while (desvio < -Math.PI) desvio += 2 * Math.PI;
+        if (Math.abs(desvio) < TOLERANCIA_ANGULO) {
+          // Se proyecta sobre el eje en vez de girar el punto: asi la linea se
+          // queda donde has parado el dedo, no se alarga sola.
+          const proy = du * Math.cos(objetivo) + dv * Math.sin(objetivo);
+          return {
+            u: ref.u + Math.cos(objetivo) * proy,
+            v: ref.v + Math.sin(objetivo) * proy,
+            tipo: 'recto',
+          };
+        }
+      }
+    }
+    return { u: p.u, v: p.v, tipo: null };
+  }
+
   _abajo(e) {
     this._punteros.add(e.pointerId);
     if (this._punteros.size > 1) {
       // Segundo dedo: manda el gesto de camara y se tira lo que hubiera a medias.
       this._cancelarTrazo();
+      this._pendiente = null;
+      this._quitarVistaPrevia();
+      this._mira(null);
       return;
     }
     if (!this._dibujaEste(e)) return;
 
+    const s = this._puntoPantalla(e);
+    this._mira(s);
+
     if (!this.planoActivo) {
       // Sin papel no se puede dibujar: el primer toque lo fija.
-      this.fijarPlanoEn(e.clientX, e.clientY);
+      this.fijarPlanoEn(s.x, s.y);
+      this._mira(null);
       return;
     }
 
-    const p = this._puntoEnPapel(e.clientX, e.clientY, true);
-    if (!p) { this._mensaje('El papel esta de canto desde aqui: gira un poco la vista.'); return; }
+    const libre = this._puntoEnPapel(s.x, s.y, true);
+    if (!libre) {
+      this._mensaje('El papel esta de canto desde aqui: gira un poco la vista.');
+      this._mira(null);
+      return;
+    }
     e.preventDefault();
 
-    if (this.herramienta === 'borrador') { this._borrarEn(p); return; }
+    if (this.herramienta === 'borrador') { this._borrarEn(libre); this._mira(null); return; }
 
     if (this.herramienta === 'polilinea') {
-      this._puntoPolilinea(p);
+      // El vertice no se coloca al tocar, sino al levantar: mientras tanto se
+      // arrastra con la linea a la vista. En tactil no hay puntero flotando, y
+      // sin esto se colocan los vertices a ciegas.
+      this._pendiente = this._enganchar(libre, this._ultimoVertice());
+      this._pintarVistaPrevia();
       return;
     }
 
+    const p = this._enganchar(libre, null);
     this._trazoActivo = new Trazo({
       plano: this.planoActivo,
-      puntos: this.herramienta === 'rectangulo' ? [p.u, p.v, p.u, p.v, p.u, p.v, p.u, p.v] : [p.u, p.v],
+      puntos: this.herramienta === 'rectangulo'
+        ? [p.u, p.v, p.u, p.v, p.u, p.v, p.u, p.v]
+        : [p.u, p.v],
       color: this.color,
       grosor: this.grosor,
       cerrado: this.herramienta === 'rectangulo',
@@ -364,15 +457,32 @@ export class Dibujo {
   }
 
   _mover(e) {
-    if (!this._trazoActivo || this._punteros.size > 1) return;
-    if (!this._punteros.has(e.pointerId)) return;
-    const p = this._puntoEnPapel(e.clientX, e.clientY, false);
+    if (this._punteros.size > 1 || !this._punteros.has(e.pointerId)) return;
+    if (!this.planoActivo) return;
+    const s = this._puntoPantalla(e);
+
+    if (this.herramienta === 'polilinea') {
+      if (!this._pendiente) return;
+      const libre = this._puntoEnPapel(s.x, s.y, false);
+      if (!libre) return;
+      e.preventDefault();
+      this._mira(s);
+      this._pendiente = this._enganchar(libre, this._ultimoVertice());
+      this._pintarVistaPrevia();
+      return;
+    }
+
+    if (!this._trazoActivo) return;
+    const p = this._puntoEnPapel(s.x, s.y, false);
     if (!p) return;
     e.preventDefault();
+    this._mira(s);
 
     if (this.herramienta === 'rectangulo') {
       const o = this._origenRect;
-      this._trazoActivo.puntos = rectangulo(o.u, o.v, p.u, p.v);
+      const esquina = this._enganchar(p, null);
+      this._trazoActivo.puntos = rectangulo(o.u, o.v, esquina.u, esquina.v);
+      this._cota(`${formatoMetros(Math.abs(esquina.u - o.u))} x ${formatoMetros(Math.abs(esquina.v - o.v))}`);
     } else {
       const n = this._trazoActivo.numeroDePuntos;
       const du = p.u - this._trazoActivo.puntos[n * 2 - 2];
@@ -380,6 +490,7 @@ export class Dibujo {
       // Muestras a menos de 2 px no aportan forma y multiplican el coste.
       if (Math.hypot(du, dv) < this._metrosPorPixel() * 2) return;
       this._trazoActivo.añadir(p.u, p.v);
+      this._cota(formatoMetros(this._trazoActivo.longitud()));
     }
 
     // Reconstruir la geometria en cada evento de puntero satura el movil:
@@ -395,7 +506,15 @@ export class Dibujo {
   _arriba(e) {
     this._punteros.delete(e.pointerId);
     if (e.pointerType === 'pen') this.viewer.controls.enabled = true;
+    this._mira(null);
+
+    if (this.herramienta === 'polilinea') {
+      if (this._pendiente) this._confirmarVertice();
+      return;
+    }
+
     if (!this._trazoActivo) return;
+    this._cota(null);
 
     const t = this._trazoActivo;
     this._trazoActivo = null;
@@ -424,15 +543,70 @@ export class Dibujo {
   }
 
   _cancelarTrazo() {
+    this._cota(null);
     if (!this._trazoActivo) return;
     this._quitarDeLaEscena(this._trazoActivo);
     this._trazoActivo = null;
     this.viewer.needsRender = true;
   }
 
-  // --- polilinea (toque a toque, con ajuste a los puntos) --------------------
+  // --- polilinea: se arrastra el vertice y se suelta donde toca --------------
 
-  _puntoPolilinea(p) {
+  /** Ultimo vertice colocado de la polilinea en curso, si la hay. */
+  _ultimoVertice() {
+    const t = this._trazoEnCurso;
+    if (!t || !t.numeroDePuntos) return null;
+    const n = t.numeroDePuntos;
+    return { u: t.puntos[n * 2 - 2], v: t.puntos[n * 2 - 1] };
+  }
+
+  /** Linea fantasma entre el ultimo vertice y el dedo, con su medida. */
+  _pintarVistaPrevia() {
+    const p = this._pendiente;
+    const desde = this._ultimoVertice();
+    if (!p || !desde) {
+      this._quitarVistaPrevia();
+      this._cota(p ? 'Suelta para poner el primer vertice' : null);
+      this.viewer.needsRender = true;
+      return;
+    }
+    if (!this._vistaPrevia) {
+      this._vistaPrevia = new Trazo({
+        plano: this.planoActivo, puntos: [], color: this.color, grosor: this.grosor,
+      });
+    }
+    const vp = this._vistaPrevia;
+    vp.plano = this.planoActivo;
+    vp.puntos = [desde.u, desde.v, p.u, p.v];
+    const obj = vp.construir(this._actualizarResolucion());
+    if (obj) {
+      vp.material.color.set(this.color);
+      vp.material.transparent = true;
+      vp.material.opacity = 0.5;
+      if (obj.parent !== this.overlay) this.overlay.add(obj);
+    }
+
+    const largo = Math.hypot(p.u - desde.u, p.v - desde.v);
+    const grados = (Math.atan2(p.v - desde.v, p.u - desde.u) * 180) / Math.PI;
+    const marca = p.tipo === 'vertice' ? ' · vertice' : p.tipo === 'recto' ? ' · recto' : '';
+    this._cota(`${formatoMetros(largo)} · ${grados.toFixed(0)}°${marca}`);
+    this.viewer.needsRender = true;
+  }
+
+  _quitarVistaPrevia() {
+    if (!this._vistaPrevia) return;
+    this._vistaPrevia.destruir();
+    this._vistaPrevia = null;
+  }
+
+  /** Fija el vertice que se estaba arrastrando. */
+  _confirmarVertice() {
+    const p = this._pendiente;
+    this._pendiente = null;
+    this._quitarVistaPrevia();
+    this._cota(null);
+    if (!p) return;
+
     if (!this._trazoEnCurso) {
       this._trazoEnCurso = new Trazo({
         plano: this.planoActivo,
@@ -440,16 +614,23 @@ export class Dibujo {
         color: this.color,
         grosor: this.grosor,
       });
-      this._añadirALaEscena(this._trazoEnCurso);
-      this._mensaje('Polilinea: toca cada vertice. Toca sobre el ultimo vertice para terminar.');
+      this._añadirALaEscena(this._trazoEnCurso, true);
+      this._mensaje('Arrastra y suelta cada vertice. Suelta sobre el ultimo para terminar, '
+        + 'o sobre el primero para cerrar la figura.');
       this._avisarCambio();
       return;
     }
+
     const t = this._trazoEnCurso;
     const n = t.numeroDePuntos;
-    const cerca = Math.hypot(p.u - t.puntos[n * 2 - 2], p.v - t.puntos[n * 2 - 1])
-      < this._metrosPorPixel() * 20;
-    if (cerca && n >= 2) { this._terminarPolilinea(); return; }
+    const cerca = this._metrosPorPixel() * 14;
+    const alUltimo = Math.hypot(p.u - t.puntos[n * 2 - 2], p.v - t.puntos[n * 2 - 1]);
+    const alPrimero = Math.hypot(p.u - t.puntos[0], p.v - t.puntos[1]);
+
+    if (n >= 2 && alPrimero < cerca) { t.cerrado = true; this._terminarPolilinea(); return; }
+    if (n >= 2 && alUltimo < cerca) { this._terminarPolilinea(); return; }
+    if (alUltimo < cerca) return;   // dos toques en el mismo sitio: no es un vertice
+
     t.añadir(p.u, p.v);
     this._añadirALaEscena(t, true);
     this.viewer.needsRender = true;
@@ -458,11 +639,15 @@ export class Dibujo {
 
   /** Cierra la polilinea a medias, si la hay. La expone la barra de dibujo. */
   _terminarPolilinea() {
+    this._pendiente = null;
+    this._quitarVistaPrevia();
+    this._cota(null);
     const t = this._trazoEnCurso;
     if (!t) return;
     this._trazoEnCurso = null;
     if (t.numeroDePuntos < 2) {
       this._quitarDeLaEscena(t);
+      t.destruir();
     } else {
       this._añadirALaEscena(t, true);
       this._apilar({ tipo: 'añadir', trazo: t });
@@ -472,6 +657,11 @@ export class Dibujo {
   }
 
   terminarPolilinea() { this._terminarPolilinea(); }
+
+  _mira(s) { this.onMira?.(s); }
+  _cota(texto) { this.onCota?.(texto); }
+
+
   get hayPolilineaAbierta() { return !!this._trazoEnCurso; }
 
   // --- borrador --------------------------------------------------------------
@@ -652,3 +842,8 @@ export class Dibujo {
   _avisarCambio() { this.onCambio?.(); }
 }
 
+/** Longitudes con la unidad que toca, para la medida en vivo. */
+function formatoMetros(m) {
+  if (m < 1) return `${(m * 100).toFixed(1)} cm`;
+  return `${m.toFixed(2)} m`;
+}

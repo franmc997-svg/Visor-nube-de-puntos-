@@ -141,16 +141,39 @@ los salientes.
 > sobre planos, y sin esta guarda tres garabatos sobre el suelo visto en
 > escorzo salen como 600 m de linea.
 
+### Precision con el dedo
+
+Dibujar con el dedo en un movil tiene tres problemas, y ninguno se arregla
+suavizando el trazo:
+
+- **La yema tapa el punto.** Son 8-10 mm de incertidumbre justo donde estas
+  apuntando. Por eso se dibuja **por encima del contacto**, con una **mira** en
+  cruz que marca donde va a caer el punto de verdad. La separacion se regula en
+  el panel (a 0 se desactiva, que es lo suyo con lapiz o raton).
+- **A pulso no sale nada recto.** Los segmentos que se quedan a menos de **7
+  grados** de la horizontal, la vertical o 45 grados **se enderezan solos**, y
+  los vertices se pegan a los de otros trazos si estan a menos de 16 px. En una
+  fachada, recto significa a nivel y a plomo: eso es lo que hace utilizable el
+  dibujo, no el suavizado.
+- **En tactil no hay puntero flotando**, asi que colocar vertices "tocando" es
+  hacerlo a ciegas. Los vertices se **arrastran y se sueltan**: mientras
+  arrastras ves la linea fantasma y su **medida en vivo** (longitud, angulo, y
+  si esta enganchada).
+
 ### Herramientas
 
-**Lapiz** (mano alzada), **Linea** (polilinea toque a toque; se cierra tocando
-sobre el ultimo vertice), **Rect.** y **Borrar** (toca un trazo y desaparece).
-Mas color, grosor, deshacer, y un suavizado que solo se aplica a la mano alzada
-(con lapiz nunca pasa de una pasada: el trazo ya viene fino).
+**Linea** es la herramienta por defecto y la unica que da precision con el dedo:
+arrastra y suelta cada vertice, suelta sobre el ultimo para terminar (o sobre el
+primero para cerrar la figura). Tambien esta el boton de terminar en la barra.
+
+**Lapiz** (mano alzada, para quien tenga stylus), **Rect.** y **Borrar** (toca un
+trazo y desaparece). Mas color, grosor, deshacer, y un suavizado que solo se
+aplica a la mano alzada (con lapiz nunca pasa de una pasada: el trazo ya viene
+fino).
 
 Con **Enganchar a los puntos** activado, el primer punto de cada trazo se pega
-al punto real de la nube que haya bajo el dedo, para empezar exactamente en una
-esquina.
+al punto real de la nube que haya bajo la mira, para empezar exactamente en una
+esquina del escaneo.
 
 ### Que sale de ahi
 
