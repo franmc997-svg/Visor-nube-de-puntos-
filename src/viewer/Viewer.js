@@ -291,7 +291,7 @@ export class Viewer {
    * Un raycast contra 10 M de puntos seria O(n) por toque; esto es una pasada
    * de vertices y un readPixels de 9x9.
    */
-  pickAt(clientX, clientY) {
+  pickAt(clientX, clientY, fraccion = 1) {
     if (!this.points) return null;
     const rect = this.canvas.getBoundingClientRect();
     const dpr = this.renderer.getPixelRatio();
@@ -312,7 +312,13 @@ export class Viewer {
     this.overlay.visible = false;
     this.pickMaterial.uniforms.uFar.value = this.camera.far;
     const prevRange = this.points.geometry.drawRange.count;
-    this.points.geometry.setDrawRange(0, this.cloud.count);
+    // Con `fraccion` se sondea contra una parte de la nube. Para saber si el
+    // dedo cae sobre la fachada o en el aire no hace falta el buffer entero, y
+    // esa consulta se repite varias veces por segundo mientras se dibuja.
+    // El buffer viene barajado de la carga, asi que un prefijo es una muestra
+    // uniforme de toda la nube.
+    const cuantos = Math.max(1, Math.round(this.cloud.count * Math.min(1, Math.max(0.01, fraccion))));
+    this.points.geometry.setDrawRange(0, cuantos);
 
     this.renderer.setRenderTarget(this.pickTarget);
     this.renderer.setClearColor(0xffffff, 1);

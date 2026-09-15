@@ -56,6 +56,10 @@ export class Dibujo {
     this.radioAjuste = 0;         // 0 = automatico segun el tamaño de la nube
     this.engancheOrtogonal = true;
     this.desplazamientoTactil = DESPLAZAMIENTO_TACTIL;
+    this.opacidadPapel = 0.10;
+    this.sondearNube = true;      // medir la separacion entre el papel y la nube
+    this.tamanoPapel = 0;         // 0 = automatico
+    this.verPapel = true;
 
     this.pila = [];               // acciones para deshacer
     this.rehacerPila = [];
@@ -64,14 +68,15 @@ export class Dibujo {
     this.onMira = null;           // mira de puntería: (x,y) de pantalla o null
     this.onCota = null;           // medida en vivo: texto o null
 
-    this.rejilla = null;
-    this.verRejilla = true;
+    this.papel = null;
     this._punteros = new Set();
     this._trazoActivo = null;
     this._trazoEnCurso = null;    // polilinea a medias entre toques
     this._pendiente = null;       // vertice que se esta arrastrando
     this._vistaPrevia = null;     // linea fantasma hasta el dedo
     this._ultimoRebuild = 0;
+    this._ultimaSonda = 0;
+    this._sonda = { clase: 'sobre', texto: '' };
     this._rayo = new THREE.Raycaster();
     this._planoTHREE = new THREE.Plane();
     this._inversaRaiz = new THREE.Matrix4();
@@ -91,7 +96,7 @@ export class Dibujo {
     this.trazos = [];
     this.planos.clear();
     this.planoActivo = null;
-    this._actualizarRejilla();   // sin plano activo, se limpia y libera sola
+    this._actualizarPapel();   // sin plano activo, se limpia y libera sola
     this.pila = [];
     this.rehacerPila = [];
     this._trazoActivo = null;
@@ -118,45 +123,176 @@ export class Dibujo {
       c.mouseButtons.LEFT = THREE.MOUSE.ROTATE;
       this.canvas.style.cursor = '';
     }
-    this._actualizarRejilla();
+    this._actualizarPapel();
     this._avisarCambio();
   }
 
   /**
-   * Rejilla del papel. Es lo unico que dice de un vistazo donde esta el plano y
-   * como esta orientado; sin ella el primer trazo siempre sorprende.
+   * El papel, dibujado.
+   *
+   * Un plano invisible es imposible de controlar: no sabes donde esta, ni como
+   * esta inclinado, ni si el trazo va a caer sobre la fachada o cinco metros
+   * por delante. Se dibuja como un cuadro translucido con su rejilla y su
+   * borde, y se puede ver tambien fuera del modo dibujo para colocarlo.
    */
-  _actualizarRejilla() {
-    if (this.rejilla) {
-      this.overlay.remove(this.rejilla);
-      this.rejilla.geometry.dispose();
-      this.rejilla.material.dispose();
-      this.rejilla = null;
+  _actualizarPapel() {
+    if (this.papel) {
+      this.overlay.remove(this.papel);
+      for (const hijo of this.papel.children) {
+        hijo.geometry.dispose();
+        hijo.material.dispose();
+      }
+      this.papel = null;
     }
     const plano = this.planoActivo;
-    if (!plano || !this.verRejilla || this.modo !== 'dibujar') { this.viewer.needsRender = true; return; }
+    if (!plano || !this.verPapel) { this.viewer.needsRender = true; return; }
 
-    const radio = (this.radioAjuste || this._radioPorDefecto()) * 3;
+    const radio = this.ladoPapel();
+    const grupo = new THREE.Group();
+    const p = new THREE.Vector3();
+    const esquina = (u, v) => { plano.desdePlano(u, v, p); return [p.x, p.y, p.z]; };
+
+    // Cara translucida. No escribe profundidad: asi no tapa los puntos que
+    // tiene detras, solo los tiñe, y se sigue viendo la nube a traves.
+    if (this.opacidadPapel > 0.001) {
+      const [a, b, c, d] = [esquina(-radio, -radio), esquina(radio, -radio),
+        esquina(radio, radio), esquina(-radio, radio)];
+      const cara = new THREE.BufferGeometry();
+      cara.setAttribute('position', new THREE.Float32BufferAttribute(
+        [...a, ...b, ...c, ...a, ...c, ...d], 3));
+      grupo.add(new THREE.Mesh(cara, new THREE.MeshBasicMaterial({
+        color: 0x4da3ff,
+        transparent: true,
+        opacity: this.opacidadPapel,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      })));
+    }
+
+    // Rejilla interior y borde, que es lo que deja leer la inclinacion.
     const divisiones = 12;
     const paso = (radio * 2) / divisiones;
-    const vertices = [];
-    const p = new THREE.Vector3();
+    const lineas = [];
     for (let i = 0; i <= divisiones; i++) {
-      const d = -radio + i * paso;
-      plano.desdePlano(d, -radio, p); vertices.push(p.x, p.y, p.z);
-      plano.desdePlano(d, radio, p); vertices.push(p.x, p.y, p.z);
-      plano.desdePlano(-radio, d, p); vertices.push(p.x, p.y, p.z);
-      plano.desdePlano(radio, d, p); vertices.push(p.x, p.y, p.z);
+      const t = -radio + i * paso;
+      lineas.push(...esquina(t, -radio), ...esquina(t, radio));
+      lineas.push(...esquina(-radio, t), ...esquina(radio, t));
     }
-    const geom = new THREE.BufferGeometry();
-    geom.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
-    const mat = new THREE.LineBasicMaterial({
-      color: 0x4da3ff, transparent: true, opacity: 0.28, depthWrite: false,
-    });
-    this.rejilla = new THREE.LineSegments(geom, mat);
-    this.rejilla.frustumCulled = false;
-    this.rejilla.renderOrder = 9;
-    this.overlay.add(this.rejilla);
+    const geomLineas = new THREE.BufferGeometry();
+    geomLineas.setAttribute('position', new THREE.Float32BufferAttribute(lineas, 3));
+    grupo.add(new THREE.LineSegments(geomLineas, new THREE.LineBasicMaterial({
+      color: 0x4da3ff, transparent: true, opacity: 0.30, depthWrite: false,
+    })));
+
+    const borde = [
+      ...esquina(-radio, -radio), ...esquina(radio, -radio),
+      ...esquina(radio, -radio), ...esquina(radio, radio),
+      ...esquina(radio, radio), ...esquina(-radio, radio),
+      ...esquina(-radio, radio), ...esquina(-radio, -radio),
+    ];
+    const geomBorde = new THREE.BufferGeometry();
+    geomBorde.setAttribute('position', new THREE.Float32BufferAttribute(borde, 3));
+    grupo.add(new THREE.LineSegments(geomBorde, new THREE.LineBasicMaterial({
+      color: 0x8fd0ff, transparent: true, opacity: 0.85, depthWrite: false,
+    })));
+
+    for (const hijo of grupo.children) { hijo.frustumCulled = false; hijo.renderOrder = 8; }
+    this.papel = grupo;
+    this.overlay.add(grupo);
+    this.viewer.needsRender = true;
+  }
+
+  /** Medio lado del papel, en metros. 0 = automatico segun el radio de ajuste. */
+  ladoPapel() {
+    return this.tamanoPapel || (this.radioAjuste || this._radioPorDefecto()) * 3;
+  }
+
+  // --- control del papel -----------------------------------------------------
+
+  /** Acerca o aleja el papel de la camara, siguiendo su propia normal. */
+  desplazarPapel(metros) {
+    if (!this.planoActivo) return false;
+    this.planoActivo.origen.addScaledVector(this.planoActivo.n, metros);
+    this._actualizarPapel();
+    this._reconstruirTrazos();
+    this._avisarCambio();
+    return true;
+  }
+
+  /**
+   * Pone el papel a plomo: la normal pierde su componente vertical.
+   *
+   * El ajuste por PCA de una fachada real sale casi siempre un poco caido (hay
+   * cornisas, vegetacion, ruido). Para levantar un alzado, ese "casi" estorba.
+   */
+  ponerAPlomo() {
+    const plano = this.planoActivo;
+    if (!plano) return false;
+    const arriba = this._verticalLocal();
+    const normal = plano.n.clone().addScaledVector(arriba, -plano.n.dot(arriba));
+    if (normal.lengthSq() < 1e-6) {
+      this._mensaje('Este papel es horizontal: no tiene plomo que corregir.');
+      return false;
+    }
+    const grados = THREE.MathUtils.radToDeg(plano.n.angleTo(normal.clone().normalize()));
+    const { u, v } = baseDesdeNormal(normal.normalize(), arriba);
+    plano.u.copy(u); plano.v.copy(v);
+    plano.n.crossVectors(plano.u, plano.v).normalize();
+    plano.orientarHacia(this._aLocal(this.viewer.camera.position.clone()), plano.separacion);
+    this._actualizarPapel();
+    this._reconstruirTrazos();
+    this._mensaje(`Papel a plomo: ha corregido ${grados.toFixed(1)} grados.`);
+    this._avisarCambio();
+    return true;
+  }
+
+  /**
+   * Coloca la camara perpendicular al papel, sin cambiar la distancia.
+   *
+   * Es el mejor remedio contra la imprecision: de frente, un pixel de pantalla
+   * son los mismos milimetros en toda la fachada, y el enganche ortogonal cae
+   * donde lo esperas.
+   */
+  verDeFrente() {
+    const plano = this.planoActivo;
+    if (!plano) return false;
+    const centro = this.viewer.root.localToWorld(plano.origen.clone());
+    const normalMundo = plano.n.clone().transformDirection(this.viewer.root.matrixWorld).normalize();
+    const dist = this.viewer.camera.position.distanceTo(centro);
+    this.viewer.camera.position.copy(centro).addScaledVector(normalMundo, dist);
+    this.viewer.camera.up.copy(plano.v.clone().transformDirection(this.viewer.root.matrixWorld).normalize());
+    this.viewer.controls.target.copy(centro);
+    this.viewer.controls.update();
+    this.viewer.needsRender = true;
+    return true;
+  }
+
+  /** Papeles fijados, en orden de creacion, para poder volver a uno anterior. */
+  papeles() {
+    return [...this.planos.values()].map((p, i) => ({
+      id: p.id,
+      nombre: p.nombre || `Papel ${i + 1}`,
+      activo: p === this.planoActivo,
+      trazos: this.trazos.filter((t) => t.plano === p).length,
+    }));
+  }
+
+  /** Vuelve a un papel anterior: a partir de ahi se dibuja y se borra en el. */
+  usarPapel(id) {
+    const plano = this.planos.get(id);
+    if (!plano) return false;
+    this._terminarPolilinea();
+    this.planoActivo = plano;
+    this._actualizarPapel();
+    this._avisarCambio();
+    return true;
+  }
+
+  /** Tras mover el papel hay que rehacer la geometria de sus trazos. */
+  _reconstruirTrazos() {
+    for (const t of this.trazos) {
+      if (t.plano === this.planoActivo) this._añadirALaEscena(t, true);
+    }
     this.viewer.needsRender = true;
   }
 
@@ -221,7 +357,7 @@ export class Dibujo {
     plano.orientarHacia(camaraLocal, this._separacion());
     this.planos.set(plano.id, plano);
     this.planoActivo = plano;
-    this._actualizarRejilla();
+    this._actualizarPapel();
     this.viewer.needsRender = true;
 
     const inclinacion = this.modoPlano === 'ajuste' && plano.rms
@@ -658,8 +794,58 @@ export class Dibujo {
 
   terminarPolilinea() { this._terminarPolilinea(); }
 
-  _mira(s) { this.onMira?.(s); }
-  _cota(texto) { this.onCota?.(texto); }
+  /**
+   * Situa la mira y, de paso, mide a que distancia esta la nube real.
+   *
+   * Es la pregunta que no tiene respuesta mirando la pantalla: el trazo se ve
+   * igual de bien pegado a la fachada que flotando cinco metros por delante,
+   * porque el papel es infinito y no tiene grosor. La sonda dice cuanto te
+   * separas de los puntos que hay debajo.
+   */
+  _mira(s) {
+    if (!s) { this.onMira?.(null); return; }
+    const sonda = this._sondearNube(s);
+    this.onMira?.({ x: s.x, y: s.y, estado: sonda.clase });
+  }
+
+  /**
+   * Distancia con signo entre el papel y el punto de la nube bajo la mira.
+   *
+   * El sondeo es una pasada de profundidad como la de la seleccion, pero
+   * contra una cuarta parte de los puntos: para saber si estas a 3 cm o a 3 m
+   * de la fachada no hace falta el buffer entero, y esto se repite varias veces
+   * por segundo mientras dibujas. Ademas se limita a una consulta cada 130 ms.
+   */
+  _sondearNube(s) {
+    if (!this.sondearNube || !this.planoActivo) { this._sonda = { clase: 'sobre', texto: '' }; return this._sonda; }
+    const ahora = performance.now();
+    if (ahora - this._ultimaSonda < 130) return this._sonda;
+    this._ultimaSonda = ahora;
+
+    const mundo = this.viewer.pickAt(s.x, s.y, 0.25);
+    if (!mundo) {
+      this._sonda = { clase: 'aire', texto: 'sin nube detras' };
+      return this._sonda;
+    }
+    const c = this.planoActivo.aPlano(this._aLocal(mundo.clone()));
+    const tolerancia = Math.max(0.03, this._separacion() * 4);
+    if (Math.abs(c.w) <= tolerancia) {
+      this._sonda = { clase: 'sobre', texto: 'sobre la nube' };
+    } else {
+      // n apunta hacia la camara: w > 0 significa que la nube esta por delante
+      // del papel, o sea que el trazo se queda enterrado dentro del muro.
+      this._sonda = {
+        clase: 'lejos',
+        texto: `papel ${formatoMetros(Math.abs(c.w))} ${c.w > 0 ? 'detras' : 'delante'}`,
+      };
+    }
+    return this._sonda;
+  }
+
+  _cota(texto) {
+    if (texto && this._sonda.texto) this.onCota?.(`${texto} · ${this._sonda.texto}`);
+    else this.onCota?.(texto);
+  }
 
 
   get hayPolilineaAbierta() { return !!this._trazoEnCurso; }
@@ -783,7 +969,7 @@ export class Dibujo {
       this.planos.set(plano.id, plano);
     }
     this.planoActivo = this.planos.values().next().value || null;
-    this._actualizarRejilla();
+    this._actualizarPapel();
 
     let n = 0;
     for (const to of datos.trazos) {

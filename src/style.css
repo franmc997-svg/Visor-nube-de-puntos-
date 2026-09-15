@@ -223,6 +223,11 @@ button {
   box-shadow: 0 0 2px rgba(0,0,0,0.9);
 }
 
+#mira.lejos span, #mira.aire span { background: #ffcc00; }
+#mira.lejos::after, #mira.aire::after { border-color: #ffcc00; }
+#mira.aire span { background: #ff9f0a; }
+#mira.aire::after { border-color: #ff9f0a; }
+
 #cota {
   position: fixed;
   top: calc(58px + var(--seguro-arriba));

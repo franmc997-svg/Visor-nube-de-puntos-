@@ -45,6 +45,9 @@ const AJUSTES_POR_DEFECTO = {
   dibujoIncluirNube: false,
   dibujoEnganche: true,
   dibujoDesplazamiento: 46,
+  dibujoVerPapel: true,
+  dibujoOpacidad: 0.10,
+  dibujoSonda: true,
 };
 
 function cargarAjustes() {
@@ -372,6 +375,9 @@ export class App {
     dib.ajustarAPuntos = a.dibujoAjustar;
     dib.engancheOrtogonal = a.dibujoEnganche;
     dib.desplazamientoTactil = a.dibujoDesplazamiento;
+    dib.verPapel = a.dibujoVerPapel;
+    dib.opacidadPapel = a.dibujoOpacidad;
+    dib.sondearNube = a.dibujoSonda;
   }
 
   /** Mira de punteria: sigue al dedo, desplazada para que no la tape. */
@@ -380,6 +386,9 @@ export class App {
     if (!s) { m.classList.add('oculto'); return; }
     m.style.left = `${s.x}px`;
     m.style.top = `${s.y}px`;
+    // El color dice si lo que estas dibujando cae sobre la nube o en el aire.
+    m.classList.toggle('lejos', s.estado === 'lejos');
+    m.classList.toggle('aire', s.estado === 'aire');
     m.classList.remove('oculto');
   }
 
@@ -873,15 +882,80 @@ export class App {
       format: (x) => formatoLongitud(x),
       help: 'Cuanta superficie se usa para calcular el plano. Grande = mas estable pero se come '
         + 'los quiebros; pequeño = sigue el detalle pero le afecta el ruido y los balcones.',
-      onInput: (x) => { dib.radioAjuste = x; dib._actualizarRejilla(); },
+      onInput: (x) => { dib.radioAjuste = x; dib._actualizarPapel(); },
     }));
 
+    const papeles = dib.papeles();
+    if (papeles.length > 1) {
+      add(segmentado({
+        label: 'Papel activo',
+        value: papeles.find((x) => x.activo)?.id,
+        options: papeles.map((x) => ({ id: x.id, label: `${x.nombre} (${x.trazos})` })),
+        help: 'Cada papel guarda sus trazos. Vuelve a uno anterior para seguir dibujando o '
+          + 'borrar en el: el borrador solo actua sobre el papel activo.',
+        onChange: (id) => { dib.usarPapel(id); this._renderTab(); },
+      }));
+    }
+
     add(conmutador({
-      label: 'Ver la rejilla del papel',
-      value: dib.verRejilla,
-      help: 'Dibuja una cuadricula sobre el plano de trabajo. Es lo unico que deja ver de un '
-        + 'vistazo donde esta el papel y con que inclinacion.',
-      onChange: (on) => { dib.verRejilla = on; dib._actualizarRejilla(); },
+      label: 'Ver el papel',
+      value: a.dibujoVerPapel,
+      help: 'Dibuja el plano de trabajo como una lamina translucida con su rejilla y su borde. '
+        + 'Es lo unico que deja ver de un vistazo donde esta y con que inclinacion.',
+      onChange: (on) => { this.cambiar('dibujoVerPapel', on); dib._actualizarPapel(); this._renderTab(); },
+    }));
+
+    if (a.dibujoVerPapel) {
+      add(slider({
+        label: 'Transparencia del papel', min: 0, max: 40, step: 1,
+        value: Math.round(a.dibujoOpacidad * 100),
+        format: (x) => (x ? `${x} % opaco` : 'solo rejilla'),
+        help: 'Subelo para ver bien donde cae el plano; bajalo cuando estorbe para leer la nube.',
+        onInput: (x) => { this.cambiar('dibujoOpacidad', x / 100); dib._actualizarPapel(); },
+      }));
+
+      const lado = dib.ladoPapel();
+      add(slider({
+        label: 'Tamaño del papel', min: lado / 4, max: lado * 4, step: lado / 40,
+        value: lado,
+        format: (x) => `${formatoLongitud(x * 2)} de lado`,
+        onInput: (x) => { dib.tamanoPapel = x; dib._actualizarPapel(); },
+      }));
+    }
+
+    add(segmentado({
+      label: 'Acercar o alejar el papel',
+      value: null,
+      options: [
+        { id: '-0.1', label: '\u221210 cm' },
+        { id: '-0.01', label: '\u22121 cm' },
+        { id: '0.01', label: '+1 cm' },
+        { id: '0.1', label: '+10 cm' },
+      ],
+      help: 'Mueve el papel siguiendo su propia normal, sin cambiar la inclinacion. Los trazos '
+        + 'que ya haya en el se mueven con el: son suyos.',
+      onChange: (x) => {
+        if (!dib.desplazarPapel(Number(x))) this.aviso('No hay ningun papel fijado.');
+      },
+    }));
+
+    add(boton('Ver el papel de frente', () => {
+      if (!dib.verDeFrente()) this.aviso('No hay ningun papel fijado.');
+      else this._alternarPanel();
+    }, 'secundario'));
+
+    add(boton('Poner el papel a plomo', () => {
+      if (!dib.ponerAPlomo()) return;
+      this._renderTab();
+    }, 'secundario'));
+
+    add(conmutador({
+      label: 'Medir separacion con la nube',
+      value: a.dibujoSonda,
+      help: 'Mientras dibujas, mide cuanto se separa el papel de los puntos que hay debajo y lo '
+        + 'dice en la medida en vivo. La mira se pone amarilla si te alejas de la superficie y '
+        + 'naranja si no hay nube detras: ahi estarias dibujando en el aire.',
+      onChange: (on) => { this.cambiar('dibujoSonda', on); this._aplicarAjustesDibujo(); },
     }));
 
     add(slider({

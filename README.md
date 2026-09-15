@@ -98,8 +98,9 @@ puntos de alrededor, y ese plano es el lienzo. El trazo sale limpio, se queda
 pegado a la nube al orbitar, y como se guarda en coordenadas 2D del plano
 (en metros), es geometria real y no una mancha en pantalla.
 
-Una **rejilla azul** marca donde esta el papel y con que inclinacion. Sin ella,
-el primer trazo siempre sorprende.
+El papel se dibuja como una **lamina translucida** con su rejilla y su borde:
+se ve donde esta, con que inclinacion, y se sigue leyendo la nube a traves. Sin
+verlo, el primer trazo siempre sorprende.
 
 ### Gestos
 
@@ -134,6 +135,43 @@ El primer toque en modo dibujo fija el plano. Hay cuatro formas, en la pestaña
 El **radio de ajuste** decide cuanta superficie se mira: grande es mas estable
 pero se come los quiebros; pequeño sigue el detalle pero le afectan el ruido y
 los salientes.
+
+### Controlar el papel
+
+Una vez fijado, en la pestaña *Dibujo*:
+
+- **Transparencia** y **tamaño** de la lamina. Subir la opacidad para colocarlo,
+  bajarla para leer la nube.
+- **Acercar o alejar** (±1 cm, ±10 cm). Mueve el papel por su propia normal sin
+  cambiar la inclinacion, y **se lleva sus trazos con el**: son suyos, viven en
+  sus coordenadas.
+- **Poner a plomo.** El ajuste por PCA de una fachada real sale casi siempre un
+  poco caido (cornisas, vegetacion, ruido). Esto le quita a la normal su
+  componente vertical y te dice cuantos grados ha corregido. Para levantar un
+  alzado, ese "casi" estorba.
+- **Ver de frente.** Coloca la camara perpendicular al papel sin cambiar la
+  distancia. Es el mejor remedio contra la imprecision: de frente, un pixel son
+  los mismos milimetros en toda la fachada.
+- **Papel activo.** Cada papel guarda sus trazos; puedes volver a uno anterior
+  para seguir dibujando o para borrar en el (el borrador solo actua sobre el
+  papel activo).
+
+### Saber si dibujas sobre la fachada o en el aire
+
+El papel es infinito y no tiene grosor, asi que un trazo pegado al muro y otro
+flotando cinco metros por delante **se ven exactamente igual**. Mientras dibujas
+se sondea la profundidad de la nube bajo la mira y se dice la separacion:
+
+| Lo que ves | Lo que significa |
+|---|---|
+| Mira azul, *sobre la nube* | El trazo cae sobre la superficie escaneada. |
+| Mira amarilla, *papel 12 cm delante* | Te has separado de la superficie. |
+| Mira naranja, *sin nube detras* | No hay puntos ahi: estas dibujando en el aire. |
+
+El sondeo es la misma pasada de profundidad que la seleccion, pero contra una
+**cuarta parte** de los puntos y como mucho una vez cada 130 ms: para saber si
+estas a 3 cm o a 3 m no hace falta el buffer entero, y asi no se come el
+fotograma mientras arrastras. Se puede apagar.
 
 > **Papel de canto.** Por debajo de unos 15 grados de incidencia, un pixel de
 > pantalla son metros de papel y el trazo se dispara al horizonte. El visor no
